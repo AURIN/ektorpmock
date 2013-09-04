@@ -14,7 +14,8 @@ class JsonViewEvaluator implements ViewEvaluator{
 
     @Override
     List evaluateView(DesignDocument.View view, ViewQuery query, List data) {
-        def mapList = map(view, data)
+        def mapList = map(view, data, query.key)
+
         if (view.reduce) {
             def reduceList = reduce(view, mapList, query.group)
             return reduceList
@@ -150,7 +151,7 @@ class JsonViewEvaluator implements ViewEvaluator{
         return reduceList
     }
 
-    private List map(DesignDocument.View view, List data) {
+    private List map(DesignDocument.View view, List data, Object key) {
         def mapJson = view.map
         List viewList = []
 
@@ -168,12 +169,15 @@ class JsonViewEvaluator implements ViewEvaluator{
                         emitted.put('id', jsonData._id);
                         emitted.put('key', key);
                         emitted.put('value', value);
-                        viewList.add(emitted);
+                        if (queryKey == null || key.equals(queryKey)) {
+                            viewList.add(emitted);
+                        }
                     }
                     map(jsonData);
                 """
 
             scope.put("viewList", scope, viewList)
+            scope.put("queryKey", scope, key)
             Script script = cx.compileString(source, "sharedScript", 1, null);
 
             data.each {

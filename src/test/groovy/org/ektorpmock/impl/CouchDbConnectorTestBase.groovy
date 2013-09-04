@@ -446,6 +446,37 @@ class CouchDbConnectorTestBase {
     }
 
     @Test
+    void "test QueryView key"() {
+        def designDoc = createTestDocDesignDocument()
+
+        createTestDoc()
+        createTestDoc()
+        db.create(new TestDoc(name: "Evan", age: 30))
+        db.create(new TestDoc(name: "Chris", age: 25))
+
+        List<TestDoc> testDocs = db.queryView(createQuery(designDoc.id, "byName").includeDocs(true).key("Jason"), TestDoc)
+        assert testDocs
+        testDocs.each {
+            assert "TestDoc" == it.type
+            assert it instanceof TestDoc
+            assert "Jason" == it.name
+        }
+    }
+
+    @Test
+    void "test QueryView key no results"() {
+        def designDoc = createTestDocDesignDocument()
+
+        createTestDoc()
+        createTestDoc()
+        db.create(new TestDoc(name: "Evan", age: 30))
+        db.create(new TestDoc(name: "Chris", age: 25))
+
+        List<TestDoc> testDocs = db.queryView(createQuery(designDoc.id, "byName").includeDocs(true).key("Liz"), TestDoc)
+        assert !testDocs
+    }
+
+    @Test
     void "test QueryView with reduce group"() {
         def designDoc = createTestDocDesignDocument()
 
@@ -666,6 +697,12 @@ class CouchDbConnectorTestBase {
                     emit( doc._id, doc._id )
             }
         """)
+        def byName = new DesignDocument.View("""
+            function(doc) {
+                if (doc.type == 'TestDoc')
+                    emit( doc.name, doc._id )
+            }
+        """)
         def totalAgeByNameView = new DesignDocument.View("""
             function(doc) {
                 if (doc.type == 'TestDoc')
@@ -692,6 +729,7 @@ class CouchDbConnectorTestBase {
             }""",  "_stats")
         designDoc.views = [
                 "all": allView,
+                "byName": byName,
                 "totalAgeByName": totalAgeByNameView,
                 "builtInTotalAgeByNameView": builtInTotalAgeByNameView,
                 "builtInCountView": builtInCountView,
