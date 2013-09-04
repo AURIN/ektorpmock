@@ -335,11 +335,13 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
     AttachmentInputStream getAttachment(String id, String attachmentId, String revision) {
         String json = getJsonString(id, new Options())
         Map map = new JsonSlurper().parseText(json)
-        Map<String, Attachment> attachmentsMap = map._attachments
+        Map<String, Map> attachmentsMap = map._attachments
         Map attachmentMap = attachmentsMap.get(attachmentId)
         String attachmentString = jsonSerializer.toJson(attachmentMap)
         Attachment attachment = objectMapper.readValue(attachmentString, Attachment)
-        return new AttachmentInputStream(attachmentId, IOUtils.toInputStream(attachment.dataBase64), attachment.contentType)
+//        This seems to be required for an odd backwards compatibility issue
+        String data = attachment.dataBase64 ?: attachment.anonymous.get("data")
+        return new AttachmentInputStream(attachmentId, IOUtils.toInputStream(new String(data.decodeBase64())), attachment.contentType)
     }
 
     /**
@@ -388,7 +390,7 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         if (map._attachments.get(stream.id)) {
             throw new UpdateConflictException()
         }
-        map._attachments.put(stream.id, new Attachment(stream.id, IOUtils.toString(stream), stream.contentType))
+        map._attachments.put(stream.id, new Attachment(stream.id, IOUtils.toString(stream).bytes.encodeBase64().toString(), stream.contentType))
         map._rev = incrementRevision(map._rev)
         json = jsonSerializer.toJson(map)
         data.putAt(docId, json)

@@ -17,6 +17,7 @@ import org.ektorp.support.StdDesignDocumentFactory
 import org.ektorp.impl.NameConventions
 import org.ektorp.ViewResult
 import org.codehaus.jackson.JsonNode
+import org.ektorp.Attachment
 
 @Ignore
 class CouchDbConnectorTestBase {
@@ -379,6 +380,18 @@ class CouchDbConnectorTestBase {
         AttachmentInputStream ais = db.getAttachment(staticId, attachmentId)
 
         assert data == IOUtils.toString(ais)
+    }
+
+
+    @Test
+    void "attach to document"() {
+        def testDoc = new TestDoc()
+        testDoc.addInlineAttachment(new Attachment("attachmentId", "data".bytes.encodeBase64().toString(), "text"))
+        db.create(testDoc)
+        assert testDoc.id
+
+        AttachmentInputStream ais = db.getAttachment(testDoc.id, "attachmentId")
+        assert "data" == IOUtils.toString(ais)
     }
 
     @Test
