@@ -453,7 +453,7 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
 
     @Override
     String path() {
-        return null  //To change body of implemented methods use File | Settings | File Templates.
+        return this.class.name
     }
 
     @Override
