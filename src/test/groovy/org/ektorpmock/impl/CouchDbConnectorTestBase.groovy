@@ -489,6 +489,13 @@ class CouchDbConnectorTestBase {
     }
 
     @Test
+    void "test revision limit setter and getter"() {
+        int initRevLimit = db.getRevisionLimit()
+        db.setRevisionLimit(initRevLimit + 1)
+        assert (initRevLimit + 1) == db.getRevisionLimit()
+    }
+
+    @Test
     void "contains"() {
         assert !db.contains(staticId)
 

@@ -44,6 +44,7 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
     private final ObjectMapper objectMapper
     private JsonSerializer jsonSerializer
     private ViewEvaluator viewEvaluator
+    private int revisionLimit
 
 
     private Map<String, String> data
@@ -507,7 +508,7 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
 
     @Override
     String getDatabaseName() {
-        return null  //To change body of implemented methods use File | Settings | File Templates.
+        return Integer.toHexString(System.identityHashCode(this))
     }
 
     @Override
@@ -525,6 +526,13 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         return null  //To change body of implemented methods use File | Settings | File Templates.
     }
 
+    /**
+     * Obtains information about a given design document, including the index, index size and current status of the
+     * design document and associated index information.
+     *
+     * @param designDocId
+     * @return
+     */
     @Override
     DesignDocInfo getDesignDocInfo(String designDocId) {
         return null  //To change body of implemented methods use File | Settings | File Templates.
@@ -547,12 +555,12 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
 
     @Override
     int getRevisionLimit() {
-        return 0  //To change body of implemented methods use File | Settings | File Templates.
+        return revisionLimit
     }
 
     @Override
     void setRevisionLimit(int limit) {
-        //To change body of implemented methods use File | Settings | File Templates.
+        revisionLimit = limit
     }
 
     @Override
