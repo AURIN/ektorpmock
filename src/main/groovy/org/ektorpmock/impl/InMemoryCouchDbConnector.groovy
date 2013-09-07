@@ -36,6 +36,7 @@ import org.ektorp.impl.ObjectMapperFactory
 import org.ektorp.impl.StreamingJsonSerializer
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.ektorp.DbAccessException
+import com.fasterxml.jackson.databind.JsonNode
 
 
 class InMemoryCouchDbConnector implements CouchDbConnector {
@@ -134,6 +135,32 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         if (!id) {
             throw new IllegalArgumentException("id can not be empty")
         }
+
+        _update(o)
+
+    }
+
+    /**
+     * Sends a document to the Couch server as a JSON stream
+     * @param id the document ID
+     * @param document an InputStream of the JSON document
+     * @param length the length of the JSON document
+     * @param options options to pass to the Couch request
+     */
+    @Override
+    void update(String id, InputStream document, long length, Options options) {
+        if (!id) {
+            throw new IllegalArgumentException("id can not be empty")
+        }
+
+        def jsonNode = objectMapper.readTree(document)
+        Documents.setId(jsonNode, id)
+
+        _update(jsonNode)
+    }
+
+    private void _update(Object o) {
+        def id = Documents.getId(o)
         def revision = Documents.getRevision(o)
         if (!revision) {
             create(o)
@@ -186,14 +213,48 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         return incrementRevision(currentRevision)
     }
 
+    /**
+     * Copies a document to the target document id.
+     * Useful when you want to duplicate docs with large attachments.
+     *
+     * @param sourceDocId
+     * @param targetDocId
+     * @return revision of the target document.
+     */
     @Override
     String copy(String sourceDocId, String targetDocId) {
-        return null  //To change body of implemented methods use File | Settings | File Templates.
+        if (contains(targetDocId)) {
+            throw new UpdateConflictException()
+        }
+        def sourceDoc = getAsStream(sourceDocId)
+        JsonNode jsonNode = objectMapper.readTree(sourceDoc)
+
+        Documents.setId(jsonNode, targetDocId)
+        data.put(targetDocId, jsonNode.toString())
+        revisions.put(targetDocId, new Revisions(1, [targetDocId]))
+        def revisionMapEntry = new LinkedHashMap<String, String>()
+        revisionMapEntry.put(targetDocId, jsonNode.toString())
+        revisionMap.put(targetDocId, revisionMapEntry)
+        return Documents.getRevision(jsonNode)
     }
 
+    /**
+     *
+     * Copies a document and overwrites the target document.
+     * Useful when you want to duplicate docs with large attachments.
+     *
+     * @param sourceDocId
+     * @param targetDocId
+     * @param targetRevision
+     * @return revision of the target document.
+     */
     @Override
     String copy(String sourceDocId, String targetDocId, String targetRevision) {
-        return null  //To change body of implemented methods use File | Settings | File Templates.
+        def sourceDoc = getAsStream(sourceDocId)
+
+        update(targetDocId, sourceDoc, sourceDoc.available().toLong(), new Options().revision(targetRevision))
+
+        return getRevisions(targetDocId).last().rev
     }
 
     @Override
@@ -591,11 +652,6 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
 
     @Override
     void updateMultipart(String id, InputStream stream, String boundary, long length, Options options) {
-        //To change body of implemented methods use File | Settings | File Templates.
-    }
-
-    @Override
-    void update(String id, InputStream document, long length, Options options) {
         //To change body of implemented methods use File | Settings | File Templates.
     }
 

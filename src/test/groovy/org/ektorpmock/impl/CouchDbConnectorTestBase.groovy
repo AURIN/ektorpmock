@@ -19,6 +19,7 @@ import org.ektorp.ViewResult
 import org.ektorp.Attachment
 import com.fasterxml.jackson.databind.JsonNode
 import org.ektorp.DbAccessException
+import org.ektorp.impl.StreamingJsonSerializer
 
 @Ignore
 class CouchDbConnectorTestBase {
@@ -205,6 +206,118 @@ class CouchDbConnectorTestBase {
     }
 
     @Test
+    void "update stream updates document"() {
+        def jsonSerialiazer = new StreamingJsonSerializer(new StdObjectMapperFactory().createObjectMapper())
+        def testDoc = createTestDoc()
+        assert 31 == testDoc.age
+        testDoc.age = 32
+
+        def json = jsonSerialiazer.toJson(testDoc)
+        def stream = IOUtils.toInputStream(json)
+        db.update(testDoc.id, stream, stream.available().toLong(), new Options())
+
+        assert 32 == db.get(TestDoc, testDoc.id).age
+    }
+
+    @Test
+    void "update stream creates document given id"() {
+        def jsonSerialiazer = new StreamingJsonSerializer(new StdObjectMapperFactory().createObjectMapper())
+        def testDoc = new TestDoc(id: staticId, name: "Jason", age: 31)
+        assert !testDoc.revision
+
+        def json = jsonSerialiazer.toJson(testDoc)
+        def stream = IOUtils.toInputStream(json)
+        db.update(testDoc.id, stream, stream.available().toLong(), new Options())
+
+        def newDoc = db.get(TestDoc, staticId)
+        assert newDoc.id
+        assert newDoc.revision
+    }
+
+    @Test(expected = IllegalArgumentException)
+    void "update stream empty id"() {
+        def jsonSerialiazer = new StreamingJsonSerializer(new StdObjectMapperFactory().createObjectMapper())
+        def testDoc = new TestDoc(name: "Jason", age: 31)
+        assert !testDoc.id
+        assert !testDoc.revision
+
+        def json = jsonSerialiazer.toJson(testDoc)
+        def stream = IOUtils.toInputStream(json)
+        db.update(testDoc.id, stream, stream.available().toLong(), new Options())
+    }
+
+    @Test
+    void "update stream updates revision"() {
+        def jsonSerialiazer = new StreamingJsonSerializer(new StdObjectMapperFactory().createObjectMapper())
+        def testDoc = createTestDoc()
+        def revision = testDoc.revision
+        assert 31 == testDoc.age
+
+        def json = jsonSerialiazer.toJson(testDoc)
+        def stream = IOUtils.toInputStream(json)
+        db.update(testDoc.id, stream, stream.available().toLong(), new Options())
+
+
+        assert revisionToInt(revision) + 1 == revisionToInt(db.get(TestDoc, testDoc.id).revision)
+    }
+
+    @Test
+    void "update stream appends revision list"() {
+        def jsonSerialiazer = new StreamingJsonSerializer(new StdObjectMapperFactory().createObjectMapper())
+        def newDoc = createTestDoc()
+
+        def savedDoc = db.get(TestDoc, newDoc.id)
+        assert 31 == savedDoc.age
+        savedDoc.age = 32
+        def json = jsonSerialiazer.toJson(savedDoc)
+        def stream = IOUtils.toInputStream(json)
+        db.update(savedDoc.id, stream, stream.available().toLong(), new Options())
+
+        savedDoc = db.get(TestDoc, newDoc.id, new Options().revision(newDoc.revision))
+        assert "Jason" == savedDoc.name
+        assert 31 == savedDoc.age
+        assert newDoc.id == savedDoc.id
+        assert newDoc.revision == savedDoc.revision
+    }
+
+    @Test
+    void "update stream appends revisions"() {
+        def jsonSerialiazer = new StreamingJsonSerializer(new StdObjectMapperFactory().createObjectMapper())
+        def newDoc = createTestDoc()
+
+        def savedDoc = db.get(TestDoc, newDoc.id, new Options().includeRevisions())
+        assert savedDoc.revisions
+        assert 1 == savedDoc.revisions.ids.size
+
+        def json = jsonSerialiazer.toJson(savedDoc)
+        def stream = IOUtils.toInputStream(json)
+        db.update(savedDoc.id, stream, stream.available().toLong(), new Options())
+
+        savedDoc = db.get(TestDoc, newDoc.id, new Options().includeRevisions())
+        assert savedDoc.revisions
+        assert 2 == savedDoc.revisions.ids.size
+    }
+
+
+
+    @Test(expected=UpdateConflictException)
+    void "update stream UpdateConflictException"() {
+        def jsonSerialiazer = new StreamingJsonSerializer(new StdObjectMapperFactory().createObjectMapper())
+        def staleTestDoc = createTestDoc()
+        def id = staleTestDoc.id
+        def staleRevision = staleTestDoc.revision
+
+        def testDoc = db.get(TestDoc, id)
+        db.update(testDoc)
+        assert revisionToInt(staleRevision) < revisionToInt(testDoc.revision)
+
+
+        def json = jsonSerialiazer.toJson(staleTestDoc)
+        def stream = IOUtils.toInputStream(json)
+        db.update(staleTestDoc.id, stream, stream.available().toLong(), new Options())
+    }
+
+    @Test
     void "delete object"() {
         def testDoc = createTestDoc()
         def revision = testDoc.revision
@@ -262,6 +375,73 @@ class CouchDbConnectorTestBase {
         assert revisionToInt(staleRevision) < revisionToInt(testDoc.revision)
 
         db.delete(id, staleRevision.replaceFirst("$staleRevisionInt", "0"))
+    }
+
+    @Test
+    void "test copy"() {
+        def testDoc = createTestDoc()
+        assert testDoc.id
+        try {
+            db.getAsStream("newId")
+            assert false
+        } catch (DbAccessException dbae) {}
+
+        String revision = db.copy(testDoc.id, "newId")
+
+        def newTestDoc = db.get(TestDoc, "newId")
+        assert revision == newTestDoc.revision
+//        This behavior seems odd, but it's what a real couchdb does
+        assert testDoc.revision == newTestDoc.revision
+        assert "newId" == newTestDoc.id
+        assert testDoc.name == newTestDoc.name
+        assert testDoc.age == newTestDoc.age
+    }
+
+    @Test(expected=UpdateConflictException)
+    void "test copy new id exists"() {
+        def testDoc = createTestDoc()
+        assert testDoc.id
+
+        String revision = db.copy(testDoc.id, testDoc.id)
+    }
+
+    @Test(expected=DbAccessException)
+    void "test copy old id does not exist"() {
+        def testDoc = createTestDoc()
+        assert testDoc.id
+
+        String revision = db.copy("badId", "newId")
+    }
+
+    @Test
+    void "test copy target revision"() {
+        TestDoc testDoc1 = createTestDoc()
+        TestDoc testDoc2 = new TestDoc(name: "Evan", age: 30)
+        db.create(testDoc2)
+
+        String revision = db.copy(testDoc1.id, testDoc2.id, testDoc2.revision)
+
+        def copiedTestDoc = db.get(TestDoc, testDoc2.id)
+
+        assert revision == copiedTestDoc.revision
+        assert testDoc2.revision != copiedTestDoc.revision
+        assert testDoc2.revision != copiedTestDoc.revision
+        assert testDoc2.id == copiedTestDoc.id
+        assert testDoc1.name == copiedTestDoc.name
+        assert testDoc1.age == copiedTestDoc.age
+    }
+
+    @Test(expected=UpdateConflictException)
+    void "test copy target revision old"() {
+        TestDoc testDoc1 = createTestDoc()
+        TestDoc testDoc2 = new TestDoc(name: "Evan", age: 30)
+        db.create(testDoc2)
+        def revision1 = testDoc2.revision
+        db.update(testDoc2)
+        def revision2 = testDoc2.revision
+        assert revision1 != revision2
+
+        String revision = db.copy(testDoc1.id, testDoc2.id, revision1)
     }
 
     @Test
