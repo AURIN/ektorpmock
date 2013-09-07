@@ -5,10 +5,10 @@ import org.ektorp.support.DesignDocument
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.Scriptable
 import org.mozilla.javascript.Script
-import org.codehaus.jackson.map.ObjectMapper
 import org.mozilla.javascript.NativeObject
 import org.ektorp.ViewQuery
 import org.ektorp.impl.StreamingJsonSerializer
+import com.fasterxml.jackson.databind.ObjectMapper
 
 class JsonViewEvaluator implements ViewEvaluator{
 

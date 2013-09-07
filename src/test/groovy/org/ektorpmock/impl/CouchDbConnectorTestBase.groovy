@@ -16,8 +16,9 @@ import org.ektorp.ViewQuery
 import org.ektorp.support.StdDesignDocumentFactory
 import org.ektorp.impl.NameConventions
 import org.ektorp.ViewResult
-import org.codehaus.jackson.JsonNode
 import org.ektorp.Attachment
+import com.fasterxml.jackson.databind.JsonNode
+import org.ektorp.DbAccessException
 
 @Ignore
 class CouchDbConnectorTestBase {
@@ -573,24 +574,36 @@ class CouchDbConnectorTestBase {
         }
         JsonNode node = row.valueAsNode
         node.with {
-            assert 1 == it.getPath("min").valueAsInt
-            assert 3 == it.getPath("max").valueAsInt
-            assert 3 == it.getPath("count").valueAsInt
-            assert 6 == it.getPath("sum").valueAsInt
-            assert 14 == it.getPath("sumsqr").valueAsInt
+            assert 1 == it.get("min").asInt()
+            assert 3 == it.get("max").asInt()
+            assert 3 == it.get("count").asInt()
+            assert 6 == it.get("sum").asInt()
+            assert 14 == it.get("sumsqr").asInt()
         }
     }
 
-
-    @Test
     void "test QueryView docs not included"() {
         def designDoc = createTestDocDesignDocument()
 
         createTestDoc()
         db.create(new TestBook(title: "Hop On Pop", author: "Dr. Seuss"))
 
-        List<TestDoc> testDocs = db.queryView(createQuery(designDoc.id, "all"), TestDoc)
-        assert !testDocs
+        ViewResult vr = db.queryView(createQuery(designDoc.id, "all").includeDocs(false))
+
+        vr.iterator().each { ViewResult.Row r ->
+            assert r.id
+            assert !r.doc
+        }
+    }
+
+    @Test(expected=DbAccessException)
+    void "test QueryView docs not included class given"() {
+        def designDoc = createTestDocDesignDocument()
+
+        createTestDoc()
+        db.create(new TestBook(title: "Hop On Pop", author: "Dr. Seuss"))
+
+        List<TestDoc> testDocs = db.queryView(createQuery(designDoc.id, "all").includeDocs(false), TestDoc)
     }
 
     @Test(expected = DocumentNotFoundException)

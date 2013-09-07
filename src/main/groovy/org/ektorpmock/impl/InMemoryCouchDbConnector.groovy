@@ -23,23 +23,19 @@ import org.ektorp.UpdateHandlerRequest
 import org.ektorp.UpdateConflictException
 import org.ektorp.util.Assert
 import org.ektorp.util.Documents
-import org.codehaus.jackson.map.ObjectMapper
 import org.ektorp.DocumentNotFoundException
 import groovy.json.JsonSlurper
 import org.ektorp.support.Revisions
 import org.apache.commons.io.IOUtils
 import org.ektorp.Attachment
 import org.ektorp.support.DesignDocument
-import javax.script.Bindings
-import javax.script.CompiledScript
-import javax.script.Compilable
-import javax.script.ScriptEngine
-import javax.script.ScriptEngineManager
 import org.ektorp.ViewEvaluator
 import org.ektorp.impl.JsonSerializer
 import org.ektorp.impl.StdObjectMapperFactory
 import org.ektorp.impl.ObjectMapperFactory
 import org.ektorp.impl.StreamingJsonSerializer
+import com.fasterxml.jackson.databind.ObjectMapper
+import org.ektorp.DbAccessException
 
 
 class InMemoryCouchDbConnector implements CouchDbConnector {
@@ -410,13 +406,13 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
 
     @Override
     def <T> List<T> queryView(ViewQuery query, Class<T> type) {
-        ViewResult viewResult = queryView(query)
-        viewResult.rows.findAll { row ->
-            row.doc
-        }.collect { row ->
-            if (row.doc) {
-                objectMapper.readValue(row.doc, type)
+        try {
+            ViewResult viewResult = queryView(query)
+            viewResult.rows.collect { row ->
+                objectMapper.readValue(row.doc ?: "", type)
             }
+        } catch (Exception ex) {
+            throw new DbAccessException(ex)
         }
     }
 
@@ -603,7 +599,11 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         //To change body of implemented methods use File | Settings | File Templates.
     }
 
-    /**
+    @Override
+    String getCurrentRevision(String id) {
+        return null  //To change body of implemented methods use File | Settings | File Templates.
+    }
+/**
      * There must be a more efficient way to do this
      * @param view
      */
