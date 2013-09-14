@@ -20,6 +20,8 @@ import org.ektorp.Attachment
 import com.fasterxml.jackson.databind.JsonNode
 import org.ektorp.DbAccessException
 import org.ektorp.impl.StreamingJsonSerializer
+import org.ektorp.BulkDeleteDocument
+import org.ektorp.DbInfo
 
 @Ignore
 class CouchDbConnectorTestBase {
@@ -206,6 +208,36 @@ class CouchDbConnectorTestBase {
     }
 
     @Test
+    void "test update delete"() {
+        def testDoc = createTestDoc()
+        assert testDoc.id
+        def id = testDoc.id
+
+        def persistedDoc = db.get(TestDoc, id)
+        def bulkDeleteDoc = BulkDeleteDocument.of(persistedDoc)
+
+        db.update(bulkDeleteDoc)
+
+        assert !db.contains(id)
+    }
+
+    @Test
+    void "test update delete bad id"() {
+        def testDoc = createTestDoc()
+
+        def bulkDeleteDoc = new BulkDeleteDocument("badId", testDoc.revision)
+
+        assert !db.contains("badId")
+//      couchdb does not seem to return an error in this scenario.
+        db.update(bulkDeleteDoc)
+    }
+
+    @Test
+    void "test update updates updateSeq"() {
+
+    }
+
+    @Test
     void "update stream updates document"() {
         def jsonSerialiazer = new StreamingJsonSerializer(new StdObjectMapperFactory().createObjectMapper())
         def testDoc = createTestDoc()
@@ -344,6 +376,13 @@ class CouchDbConnectorTestBase {
         assert revisionToInt(staleRevision) < revisionToInt(testDoc.revision)
 
         db.delete(staleTestDoc)
+    }
+
+    @Test(expected=DocumentNotFoundException)
+    void "test delete bad id"() {
+        def testDoc = createTestDoc()
+
+        def result = db.delete("badId", testDoc.revision)
     }
 
     @Test
@@ -891,6 +930,199 @@ class CouchDbConnectorTestBase {
 
         assert totalResults == viewResult.offset
         assert 0 == viewResult.rows.size()
+    }
+
+    @Test
+    void "test addToBulkBuffer"() {
+        assert !db.bulkBufferManager.getCurrentBuffer()
+        def doc = new TestDoc()
+        db.addToBulkBuffer(doc)
+
+        assert 1 == db.bulkBufferManager.getCurrentBuffer().size()
+        assert doc == db.bulkBufferManager.getCurrentBuffer()[0]
+    }
+
+    @Test
+    void "test clearBulkBuffer"() {
+        assert !db.bulkBufferManager.getCurrentBuffer()
+        def doc = new TestDoc()
+        db.addToBulkBuffer(doc)
+
+        assert 1 == db.bulkBufferManager.getCurrentBuffer().size()
+        assert doc == db.bulkBufferManager.getCurrentBuffer()[0]
+
+        db.clearBulkBuffer()
+
+        assert !db.bulkBufferManager.getCurrentBuffer()
+    }
+
+    @Test
+    void "test flushBulkBuffer flushes buffer"() {
+        assert !db.bulkBufferManager.getCurrentBuffer()
+        def doc = new TestDoc()
+        db.addToBulkBuffer(doc)
+        assert 1 == db.bulkBufferManager.getCurrentBuffer().size()
+
+        def results = db.flushBulkBuffer()
+
+        assert !db.bulkBufferManager.getCurrentBuffer()
+    }
+
+    @Test
+    void "test flushBulkBuffer empty buffer"() {
+        assert !db.bulkBufferManager.getCurrentBuffer()
+
+        def results = db.flushBulkBuffer()
+
+        assert Collections.emptyList() == results
+    }
+
+    @Test
+    void "test executeBulk delete"() {
+        def testDoc = createTestDoc()
+        assert testDoc.id
+        def id = testDoc.id
+
+        def persistedDoc = db.get(TestDoc, id)
+        def bulkDeleteDoc = BulkDeleteDocument.of(persistedDoc)
+
+        def results = db.executeBulk([bulkDeleteDoc])
+
+        assert !results
+
+        assert !db.contains(id)
+    }
+
+    @Test
+    void "test executeBulk delete out of date"() {
+        def testDoc = createTestDoc()
+        assert testDoc.id
+        def id = testDoc.id
+        def persistedDoc = db.get(TestDoc, id)
+        db.update(persistedDoc)
+
+        def results = db.executeBulk([BulkDeleteDocument.of(testDoc)])
+
+        assert 1 == results.size()
+        def result = results[0]
+        assert testDoc.id == result.id
+        assert null == result.revision
+        assert "conflict" == result.error
+        assert "Document update conflict." == result.reason
+    }
+
+    @Test
+    void "test executeBulk delete badid"() {
+        assert !db.contains("badid")
+        def testDoc = createTestDoc()
+        def bulkDeleteDoc = new BulkDeleteDocument("badid", testDoc.revision)
+
+        def results = db.executeBulk([bulkDeleteDoc])
+
+        assert !results
+    }
+
+    @Test
+    void "test executeBulk update"() {
+        def testDoc = createTestDoc()
+        assert testDoc.id
+        def id = testDoc.id
+        def rev = testDoc.revision
+
+        def results = db.executeBulk([testDoc])
+
+        assert !results
+
+        testDoc = db.get(TestDoc, id)
+        assert rev != testDoc.revision
+    }
+
+    @Test
+    void "test executeBulk update out of date"() {
+        def testDoc = createTestDoc()
+        assert testDoc.id
+        def id = testDoc.id
+        def persistedDoc = db.get(TestDoc, id)
+        db.update(persistedDoc)
+        def rev = persistedDoc.revision
+        assert testDoc.revision != persistedDoc.revision
+
+        def results = db.executeBulk([testDoc])
+
+        assert 1 == results.size()
+        def result = results[0]
+        assert testDoc.id == result.id
+        assert null == result.revision
+        assert "conflict" == result.error
+        assert "Document update conflict." == result.reason
+        assert rev == db.get(TestDoc, id).revision
+    }
+
+    @Test
+    void "test executeBulk create"() {
+        def testDoc = new TestDoc()
+
+        def results = db.executeBulk([testDoc])
+
+        assert !results
+        assert testDoc.id
+        assert testDoc.revision
+    }
+
+    @Test
+    void "test executeBulk some fail"() {
+        def testDoc1 = createTestDoc()
+        assert testDoc1.id
+        def id = testDoc1.id
+        def persistedDoc = db.get(TestDoc, id)
+        db.update(persistedDoc)
+
+        def testDoc2 = new TestDoc()
+
+        def results = db.executeBulk([testDoc1, testDoc2])
+
+        assert 1 == results.size()
+        def result = results[0]
+        assert testDoc1.id == result.id
+        assert null == result.revision
+        assert "conflict" == result.error
+        assert "Document update conflict." == result.reason
+
+        assert testDoc2.id
+        assert testDoc2.revision
+        assert db.get(TestDoc, testDoc2.id)
+    }
+
+    @Test
+    void "test executeAllOrNothing some fail"() {
+        def testDoc1 = createTestDoc()
+        assert testDoc1.id
+        def id = testDoc1.id
+        def rev = testDoc1.revision
+        def age = testDoc1.age
+        def newAge = age + 1
+        def persistedDoc = db.get(TestDoc, id)
+        db.update(persistedDoc)
+        assert testDoc1.revision != persistedDoc.revision
+        testDoc1.age = newAge
+
+        def testDoc2 = new TestDoc()
+
+//        I'm still unclear what the expected behavior is here.
+        def results = db.executeAllOrNothing([testDoc1, testDoc2])
+        assert !results
+
+        def bulkUpdatedDoc = db.get(TestDoc, id)
+        assert age == bulkUpdatedDoc.age
+        assert persistedDoc.revision == bulkUpdatedDoc.revision
+
+        assert testDoc2.id
+        assert testDoc2.revision
+    }
+
+    @Test
+    void "test changes"() {
+
     }
 
     private createTestDocDesignDocument() {

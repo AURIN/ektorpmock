@@ -30,6 +30,8 @@ class StdCouchDbConnectorTests extends CouchDbConnectorTestBase {
     @Before
     void setUp() {
         db = dbInstance.createConnector("ektorp_mock", true);
+//        This seems to be required due to the threadlocal nature of the bulk buffer
+        db.clearBulkBuffer()
     }
 
     @After

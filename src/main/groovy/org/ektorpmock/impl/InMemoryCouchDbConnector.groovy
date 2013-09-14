@@ -37,6 +37,7 @@ import org.ektorp.impl.StreamingJsonSerializer
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.ektorp.DbAccessException
 import com.fasterxml.jackson.databind.JsonNode
+import org.ektorp.impl.ThreadLocalBulkBufferHolder
 
 
 class InMemoryCouchDbConnector implements CouchDbConnector {
@@ -45,6 +46,8 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
     private JsonSerializer jsonSerializer
     private ViewEvaluator viewEvaluator
     private int revisionLimit
+
+    private final ThreadLocalBulkBufferHolder bulkBufferManager = new ThreadLocalBulkBufferHolder();
 
 
     private Map<String, String> data
@@ -161,6 +164,14 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
     }
 
     private void _update(Object o) {
+        if (shouldDelete(o)) {
+            try {
+                delete(o)
+            } catch (DocumentNotFoundException dnfe) {
+//                couchdb does not seem to return an error in this scenario.
+            }
+            return
+        }
         def id = Documents.getId(o)
         def revision = Documents.getRevision(o)
         if (!revision) {
@@ -205,6 +216,9 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
     @Override
     String delete(String id, String revision) {
         Assert.hasText(id, "document id cannot be empty");
+        if (!contains(id)) {
+            throw new DocumentNotFoundException(id)
+        }
         def o = data.remove(id)
         def map = objectMapper.readValue(o, HashMap)
         def currentRevision = Documents.getRevision(map)
@@ -583,19 +597,41 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         return null  //To change body of implemented methods use File | Settings | File Templates.
     }
 
+    /**
+     * Add the object to the bulk buffer attached to the executing thread. A subsequent call to either flushBulkBuffer
+     * or clearBulkBuffer is expected.
+     *
+     * @param o
+     */
     @Override
     void addToBulkBuffer(Object o) {
-        //To change body of implemented methods use File | Settings | File Templates.
+        bulkBufferManager.add(o)
     }
 
+    /**
+     * Sends the bulk buffer attached the the executing thread to the database (through a executeBulk call). The bulk
+     * buffer will be cleared when this method is finished.
+     */
     @Override
     List<DocumentOperationResult> flushBulkBuffer() {
-        return null  //To change body of implemented methods use File | Settings | File Templates.
+        try {
+            Collection<?> buffer = bulkBufferManager.getCurrentBuffer();
+            if (buffer != null && !buffer.isEmpty()) {
+                return executeBulk(buffer);
+            } else {
+                return Collections.emptyList();
+            }
+        } finally {
+            clearBulkBuffer();
+        }
     }
 
+    /**
+     * Clears the bulk buffer attached the the executing thread.
+     */
     @Override
     void clearBulkBuffer() {
-        //To change body of implemented methods use File | Settings | File Templates.
+        bulkBufferManager.clear()
     }
 
     @Override
@@ -608,14 +644,58 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         return null  //To change body of implemented methods use File | Settings | File Templates.
     }
 
+    /**
+     * Creates, updates or deletes all objects in the supplied collection.
+     *
+     * If the object has no revision set, it will be created, otherwise it will be updated. If the object's serialized
+     * json document contains a "_deleted"=true field it will be deleted.
+     *
+     * org.ektorp.BulkDeleteDocument.of(someObject) is the easiest way to create a delete doc for an instance.
+     *
+     * Some documents may successfully be saved and some may not. The response will tell the application which documents
+     * were saved or not. In the case of a power failure, when the database restarts some may have been saved and some
+     * not.
+     *
+     * @param objects
+     *            , all objects will have their id and revision set.
+     * @return The list will only contain entries for documents that has any kind of error code returned from CouchDB.
+     *         i.e. the list will be empty if everything was completed successfully.
+     */
     @Override
     List<DocumentOperationResult> executeBulk(Collection<?> objects) {
-        return null  //To change body of implemented methods use File | Settings | File Templates.
+        return _executeBulk(objects, false);
     }
 
+    /**
+     * Creates, updates or deletes all objects in the supplied collection. In the case of a power failure, when the
+     * database restarts either all the changes will have been saved or none of them. However, it does not do conflict
+     * checking, so the documents will be committed even if this creates conflicts.
+     *
+     * @param objects
+     *            , all objects will have their id and revision set.
+     * @return The list will only contain entries for documents that has any kind of error code returned from CouchDB.
+     *         i.e. the list will be empty if everything was completed successfully.
+     */
     @Override
     List<DocumentOperationResult> executeAllOrNothing(Collection<?> objects) {
-        return null  //To change body of implemented methods use File | Settings | File Templates.
+        return _executeBulk(objects, true);
+    }
+
+    private List<DocumentOperationResult> _executeBulk(Collection<?> objects,
+                                                      boolean allOrNothing) {
+        def results = []
+
+        objects.each { object ->
+            try {
+                _update(object)
+            } catch (UpdateConflictException uce) {
+                if (!allOrNothing) {
+                    results << DocumentOperationResult.newInstance(Documents.getId(object), "conflict", "Document update conflict.")
+                }
+            }
+        }
+
+        return results
     }
 
     @Override
@@ -734,7 +814,7 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         def revision = Documents.getRevision(o)
         int revisionInt = revisionToInt(revision)
 
-        def currentDoc = get(o.class, id)
+        def currentDoc = get(JsonNode, id)
         def currentRevision = Documents.getRevision(currentDoc)
         int currentRevisionInt = revisionToInt(currentRevision)
 
@@ -744,5 +824,11 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
     private int revisionToInt(String revision) {
         if (!revision) return 0
         return revision.split("-")[0] as int
+    }
+
+    private boolean shouldDelete(Object o) {
+        def jsonNode = objectMapper.convertValue(o, JsonNode)
+        return jsonNode.get("_deleted")
+
     }
 }
