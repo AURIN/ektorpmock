@@ -118,6 +118,22 @@ class CouchDbConnectorTestBase {
     }
 
     @Test
+    void "test create updates dbInfo"() {
+        DbInfo originalDbInfo = db.getDbInfo()
+        def originalDocCount = originalDbInfo.docCount
+        def originalUpdateSeq = originalDbInfo.updateSeq
+
+        createTestDoc()
+
+        DbInfo dbInfo = db.getDbInfo()
+        def docCount = dbInfo.docCount
+        def updateSeq = dbInfo.updateSeq
+
+        assert originalDocCount + 1 == docCount
+        assert originalUpdateSeq + 1 == updateSeq
+    }
+
+    @Test
     void "update updates document"() {
         def testDoc = createTestDoc()
         assert 31 == testDoc.age
@@ -234,7 +250,16 @@ class CouchDbConnectorTestBase {
 
     @Test
     void "test update updates updateSeq"() {
+        def testDoc = createTestDoc()
+        DbInfo originalDbInfo = db.getDbInfo()
+        def originalUpdateSeq = originalDbInfo.updateSeq
 
+        db.update(testDoc)
+
+        DbInfo dbInfo = db.getDbInfo()
+        def updateSeq = dbInfo.updateSeq
+
+        assert originalUpdateSeq + 1 == updateSeq
     }
 
     @Test
@@ -378,6 +403,24 @@ class CouchDbConnectorTestBase {
         db.delete(staleTestDoc)
     }
 
+    @Test
+    void "delete object UpdateConflictException does not delete"() {
+        def staleTestDoc = createTestDoc()
+        def id = staleTestDoc.id
+        def staleRevision = staleTestDoc.revision
+
+        def testDoc = db.get(TestDoc, id)
+        db.update(testDoc)
+        assert revisionToInt(staleRevision) < revisionToInt(testDoc.revision)
+
+        try {
+            db.delete(staleTestDoc)
+            assert false
+        } catch (UpdateConflictException uce) {}
+
+        assert db.contains(staleTestDoc.id)
+    }
+
     @Test(expected=DocumentNotFoundException)
     void "test delete bad id"() {
         def testDoc = createTestDoc()
@@ -414,6 +457,23 @@ class CouchDbConnectorTestBase {
         assert revisionToInt(staleRevision) < revisionToInt(testDoc.revision)
 
         db.delete(id, staleRevision.replaceFirst("$staleRevisionInt", "0"))
+    }
+
+    @Test
+    void "test delete updates dbInfo"() {
+        def testDoc = createTestDoc()
+        DbInfo originalDbInfo = db.getDbInfo()
+        def originalUpdateSeq = originalDbInfo.updateSeq
+        def originalDocDelCount = originalDbInfo.docDelCount
+
+        db.delete(testDoc)
+
+        DbInfo dbInfo = db.getDbInfo()
+        def updateSeq = dbInfo.updateSeq
+        def docDelCount = dbInfo.docDelCount
+
+        assert originalUpdateSeq + 1 == updateSeq
+        assert originalDocDelCount + 1 == docDelCount
     }
 
     @Test
@@ -808,6 +868,7 @@ class CouchDbConnectorTestBase {
         }
     }
 
+    @Test
     void "test QueryView docs not included"() {
         def designDoc = createTestDocDesignDocument()
 

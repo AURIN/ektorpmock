@@ -46,6 +46,8 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
     private JsonSerializer jsonSerializer
     private ViewEvaluator viewEvaluator
     private int revisionLimit
+    private long updateSequence = 0
+    private long documentDeleteCount = 0
 
     private final ThreadLocalBulkBufferHolder bulkBufferManager = new ThreadLocalBulkBufferHolder();
 
@@ -57,6 +59,7 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
 
     InMemoryCouchDbConnector() {
         this(new StdObjectMapperFactory())
+
     }
 
     InMemoryCouchDbConnector(ViewEvaluator ve) {
@@ -98,6 +101,7 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         def revisionMapEntry = new LinkedHashMap<String, String>()
         revisionMapEntry.put(revision, json)
         revisionMap.put(id, revisionMapEntry)
+        updateSequence++
     }
 
     /**
@@ -188,6 +192,7 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         def oldRevisions = revisions.get(id)
         revisions.put(id, new Revisions(revisionToInt(newRevision) as long, [id] + oldRevisions.ids))
         revisionMap.get(id).put(newRevision, json)
+        updateSequence++
     }
 
     /**
@@ -219,12 +224,15 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
         if (!contains(id)) {
             throw new DocumentNotFoundException(id)
         }
-        def o = data.remove(id)
+        def o = data.get(id)
         def map = objectMapper.readValue(o, HashMap)
         def currentRevision = Documents.getRevision(map)
         if ((revisionToInt(revision)) != revisionToInt(currentRevision)) {
             throw new UpdateConflictException(id, revision)
         }
+        data.remove(id)
+        documentDeleteCount++
+        updateSequence++
         return incrementRevision(currentRevision)
     }
 
@@ -537,7 +545,11 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
 
     @Override
     DbInfo getDbInfo() {
-        return null  //To change body of implemented methods use File | Settings | File Templates.
+        def info = new DbInfo(databaseName)
+        info.docCount = data.size() as Long
+        info.updateSeq = updateSequence as String
+        info.docDelCount = documentDeleteCount
+        return info
     }
 
     /**
