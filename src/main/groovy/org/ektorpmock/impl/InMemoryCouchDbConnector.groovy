@@ -29,7 +29,7 @@ import org.ektorp.support.Revisions
 import org.apache.commons.io.IOUtils
 import org.ektorp.Attachment
 import org.ektorp.support.DesignDocument
-import org.ektorp.ViewEvaluator
+import org.ektorpmock.ViewEvaluator
 import org.ektorp.impl.JsonSerializer
 import org.ektorp.impl.StdObjectMapperFactory
 import org.ektorp.impl.ObjectMapperFactory
@@ -712,7 +712,10 @@ class InMemoryCouchDbConnector implements CouchDbConnector {
 
     @Override
     List<DocumentChange> changes(ChangesCommand cmd) {
-        return null  //To change body of implemented methods use File | Settings | File Templates.
+        if (cmd.continuous) {
+            throw new IllegalArgumentException(
+                    "ChangesCommand may not declare continous = true while calling changes");
+        }
     }
 
     @Override

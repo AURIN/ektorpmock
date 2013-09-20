@@ -1,5 +1,6 @@
-package org.ektorp;
+package org.ektorpmock;
 
+import org.ektorp.ViewQuery;
 import org.ektorp.support.DesignDocument;
 
 import java.util.List;
