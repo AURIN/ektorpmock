@@ -1,6 +1,6 @@
 package org.ektorpmock.impl
 
-import org.ektorp.ViewEvaluator
+import org.ektorpmock.ViewEvaluator
 import org.ektorp.support.DesignDocument
 import org.mozilla.javascript.Context
 import org.mozilla.javascript.Scriptable
